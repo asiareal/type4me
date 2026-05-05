@@ -30,24 +30,31 @@ import threading
 # MLX Metal cache management to prevent unbounded GPU buffer growth
 # (mlx_qwen3_asr does not free buffers; cache grows several GB per minute
 # when partial transcribe runs every ~1.5s on long audio windows.)
+_mx_clear_cache = None
+_mx_set_cache_limit = None
 try:
     import mlx.core as _mx
-    _MLX_AVAILABLE = True
+    # Newer MLX (>=0.31) moved these to top-level; older versions kept
+    # them under mx.metal. Pick whichever exists, preferring top-level.
+    _mx_clear_cache = getattr(_mx, "clear_cache", None) \
+        or getattr(getattr(_mx, "metal", None), "clear_cache", None)
+    _mx_set_cache_limit = getattr(_mx, "set_cache_limit", None) \
+        or getattr(getattr(_mx, "metal", None), "set_cache_limit", None)
     # Cap GPU buffer cache to ~2GB. Buffers above this are released.
-    try:
-        _mx.metal.set_cache_limit(2 * 1024 ** 3)
-    except Exception:
-        pass
+    if _mx_set_cache_limit is not None:
+        try:
+            _mx_set_cache_limit(2 * 1024 ** 3)
+        except Exception:
+            pass
 except Exception:
-    _mx = None
-    _MLX_AVAILABLE = False
+    pass
 
 
 def _release_gpu_memory():
     """Drop cached Metal buffers and force a Python GC pass."""
-    if _MLX_AVAILABLE:
+    if _mx_clear_cache is not None:
         try:
-            _mx.metal.clear_cache()
+            _mx_clear_cache()
         except Exception:
             pass
     gc.collect()
