@@ -56,27 +56,6 @@ struct LLMSettingsCard: View, SettingsCardHelpers {
                 dynamicCredentialFields
             }
 
-            SettingsDivider()
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(L("禁用思考模式", "Disable Thinking"))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(thinkingToggleAvailable ? TF.settingsText : TF.settingsTextSecondary)
-                    Text(thinkingToggleDescription)
-                        .font(.system(size: 10))
-                        .foregroundStyle(TF.settingsTextTertiary)
-                }
-                Spacer()
-                Toggle("", isOn: $disableThinking)
-                    .toggleStyle(.switch)
-                    .labelsHidden()
-                    .controlSize(.small)
-                    .disabled(!thinkingToggleAvailable)
-                    .onChange(of: disableThinking) { _, newValue in
-                        UserDefaults.standard.set(newValue, forKey: "tf_disableThinking")
-                    }
-            }
-
             HStack(spacing: 8) {
                 Spacer()
                 testButton(L("测试连接", "Test"), status: llmTestStatus) { testLLMConnection() }
@@ -113,21 +92,69 @@ struct LLMSettingsCard: View, SettingsCardHelpers {
         selectedLLMProvider.thinkingDisableField != nil
     }
 
+    private var thinkingModeBinding: Binding<String> {
+        Binding(
+            get: {
+                guard thinkingToggleAvailable else { return "unsupported" }
+                return disableThinking ? "disabled" : "default"
+            },
+            set: { newValue in
+                guard thinkingToggleAvailable else { return }
+                disableThinking = newValue == "disabled"
+                UserDefaults.standard.set(disableThinking, forKey: "tf_disableThinking")
+            }
+        )
+    }
+
+    private var thinkingModeOptions: [(value: String, label: String)] {
+        if thinkingToggleAvailable {
+            return [
+                ("disabled", L("禁用思考", "Disable Thinking")),
+                ("default", L("模型默认", "Model Default")),
+            ]
+        }
+        if selectedLLMProvider.needsReasoningSplit {
+            return [("unsupported", L("分离 reasoning", "Separate reasoning"))]
+        }
+        return [("unsupported", L("模型默认", "Model Default"))]
+    }
+
     private var thinkingToggleDescription: String {
         switch selectedLLMProvider {
         case .doubao, .kimi, .deepseek:
-            return L("当前服务商会发送 thinking: disabled", "Sends thinking: disabled for this provider")
+            return L("发送 thinking: disabled", "Sends thinking: disabled")
         case .bailian:
-            return L("当前服务商会发送 enable_thinking: false", "Sends enable_thinking: false for this provider")
+            return L("发送 enable_thinking: false", "Sends enable_thinking: false")
         case .zhipu:
-            return L("当前服务商会发送 reasoning_effort: none", "Sends reasoning_effort: none for this provider")
+            return L("发送 reasoning_effort: none", "Sends reasoning_effort: none")
         case .ollama:
-            return L("当前服务商会发送 think: false", "Sends think: false for this provider")
+            return L("发送 think: false", "Sends think: false")
         case .minimaxCN, .minimaxIntl:
-            return L("MiniMax 不支持关闭思考，已自动分离 reasoning 内容", "MiniMax cannot disable reasoning; reasoning is separated automatically")
+            return L("不支持关闭，已自动分离 reasoning 内容", "Cannot disable; reasoning is separated")
         default:
-            return L("当前服务商暂无可靠关闭参数，仅会隐藏返回中的 <think> 内容", "No reliable disable parameter; returned <think> text is hidden only")
+            return L("暂无可靠关闭参数，仅隐藏返回中的 <think>", "No reliable disable parameter; hides returned <think>")
         }
+    }
+
+    private var thinkingModeRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Text(L("思考模式", "Thinking Mode").uppercased())
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(0.8)
+                    .foregroundStyle(TF.settingsTextTertiary)
+                Text("|")
+                    .font(.system(size: 10))
+                    .foregroundStyle(TF.settingsTextTertiary.opacity(0.5))
+                Text(thinkingToggleDescription)
+                    .font(.system(size: 10))
+                    .foregroundStyle(TF.settingsTextTertiary)
+                    .lineLimit(1)
+            }
+            settingsDropdown(selection: thinkingModeBinding, options: thinkingModeOptions)
+                .disabled(!thinkingToggleAvailable)
+        }
+        .padding(.top, 2)
     }
 
     // MARK: - Provider Picker
@@ -242,6 +269,9 @@ struct LLMSettingsCard: View, SettingsCardHelpers {
                 if customModeFields.contains(field.key) {
                     settingsField("", text: customBinding, prompt: field.placeholder)
                 }
+                if field.key == "model" {
+                    thinkingModeRow
+                }
             }
         } else if !field.options.isEmpty {
             let pickerBinding = Binding<String>(
@@ -254,7 +284,12 @@ struct LLMSettingsCard: View, SettingsCardHelpers {
                     editedFields.insert(field.key)
                 }
             )
-            settingsPickerField(field.label, selection: pickerBinding, options: field.options)
+            VStack(alignment: .leading, spacing: 4) {
+                settingsPickerField(field.label, selection: pickerBinding, options: field.options)
+                if field.key == "model" {
+                    thinkingModeRow
+                }
+            }
         } else if field.isSecure {
             let binding = Binding<String>(
                 get: { llmCredentialValues[field.key] ?? "" },
@@ -281,7 +316,12 @@ struct LLMSettingsCard: View, SettingsCardHelpers {
                     editedFields.insert(field.key)
                 }
             )
-            settingsField(field.label, text: binding, prompt: field.placeholder)
+            VStack(alignment: .leading, spacing: 4) {
+                settingsField(field.label, text: binding, prompt: field.placeholder)
+                if field.key == "model" {
+                    thinkingModeRow
+                }
+            }
         }
     }
 
