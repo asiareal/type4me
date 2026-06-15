@@ -966,12 +966,16 @@ private struct MicrophonePrioritySheet: View {
                 }
             } else {
                 iconButton("plus.circle", disabled: false) {
-                    orderedEntries.append(entry)
+                    toggleEntry(entry)
                 }
             }
         }
         .padding(10)
+        .contentShape(Rectangle())
         .background(RoundedRectangle(cornerRadius: 8).fill(TF.settingsCardAlt))
+        .onTapGesture {
+            toggleEntry(entry)
+        }
     }
 
     private func iconButton(_ systemName: String, disabled: Bool, action: @escaping () -> Void) -> some View {
@@ -992,5 +996,13 @@ private struct MicrophonePrioritySheet: View {
         }
         let entry = orderedEntries.remove(at: index)
         orderedEntries.insert(entry, at: newIndex)
+    }
+
+    private func toggleEntry(_ entry: AudioInputDevicePreferenceEntry) {
+        if let index = orderedEntries.firstIndex(where: { $0.uid == entry.uid }) {
+            orderedEntries.remove(at: index)
+        } else {
+            orderedEntries.append(entry)
+        }
     }
 }
