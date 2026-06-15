@@ -10,14 +10,6 @@ enum AudioInputDeviceCategory: String, CaseIterable, Codable, Equatable {
     case virtual
     case other
 
-    static let defaultPriorityOrder: [AudioInputDeviceCategory] = [
-        .bluetooth,
-        .builtIn,
-        .external,
-        .virtual,
-        .other,
-    ]
-
     var displayName: String {
         switch self {
         case .bluetooth:
@@ -34,23 +26,6 @@ enum AudioInputDeviceCategory: String, CaseIterable, Codable, Equatable {
     }
 }
 
-enum AudioInputDeviceSelectionMode: String, CaseIterable {
-    case systemDefault
-    case automatic
-    case manual
-
-    var displayName: String {
-        switch self {
-        case .systemDefault:
-            return L("系统默认", "System")
-        case .automatic:
-            return L("自动优先级", "Auto")
-        case .manual:
-            return L("固定设备", "Manual")
-        }
-    }
-}
-
 struct AudioInputDevice: Identifiable, Equatable {
     var id: String { uid }
     let uid: String
@@ -59,39 +34,15 @@ struct AudioInputDevice: Identifiable, Equatable {
 }
 
 enum AudioInputDevicePreferenceStore {
-    static let selectionModeKey = "tf_microphoneSelectionMode"
     static let selectedUIDKey = "tf_selectedMicrophoneUID"
-    static let priorityOrderKey = "tf_microphonePriorityOrder"
-    static let defaultPriorityOrderStorageValue = storageValue(for: AudioInputDeviceCategory.defaultPriorityOrder)
+    static let backupUIDKey = "tf_backupMicrophoneUID"
+
+    private static let obsoleteSelectionModeKey = "tf_microphoneSelectionMode"
+    private static let obsoletePriorityOrderKey = "tf_microphonePriorityOrder"
 
     static func migrateIfNeeded() {
-        guard UserDefaults.standard.object(forKey: selectionModeKey) == nil else { return }
-        let selectedUID = UserDefaults.standard.string(forKey: selectedUIDKey) ?? ""
-        let mode: AudioInputDeviceSelectionMode = selectedUID.isEmpty ? .systemDefault : .manual
-        UserDefaults.standard.set(mode.rawValue, forKey: selectionModeKey)
-    }
-
-    static func selectionMode() -> AudioInputDeviceSelectionMode {
-        migrateIfNeeded()
-        let rawValue = UserDefaults.standard.string(forKey: selectionModeKey)
-        return rawValue.flatMap(AudioInputDeviceSelectionMode.init(rawValue:)) ?? .systemDefault
-    }
-
-    static func priorityOrder() -> [AudioInputDeviceCategory] {
-        priorityOrder(from: UserDefaults.standard.string(forKey: priorityOrderKey))
-    }
-
-    static func priorityOrder(from rawValue: String?) -> [AudioInputDeviceCategory] {
-        let parsed = (rawValue ?? "")
-            .split(separator: ",")
-            .compactMap { AudioInputDeviceCategory(rawValue: String($0)) }
-        return normalizedPriorityOrder(parsed)
-    }
-
-    static func storageValue(for order: [AudioInputDeviceCategory]) -> String {
-        normalizedPriorityOrder(order)
-            .map(\.rawValue)
-            .joined(separator: ",")
+        UserDefaults.standard.removeObject(forKey: obsoleteSelectionModeKey)
+        UserDefaults.standard.removeObject(forKey: obsoletePriorityOrderKey)
     }
 
     static func resolvedDeviceUID(devices: [AudioInputDevice] = AudioInputDeviceDiscovery.availableInputDevices()) -> String? {
@@ -99,61 +50,42 @@ enum AudioInputDevicePreferenceStore {
     }
 
     static func resolvedCachedDeviceUID() -> String? {
-        switch selectionMode() {
-        case .systemDefault:
-            return nil
-        case .manual:
-            let selectedUID = UserDefaults.standard.string(forKey: selectedUIDKey) ?? ""
-            return selectedUID.isEmpty ? nil : selectedUID
-        case .automatic:
-            let order = priorityOrder()
-            if let cached = resolvedAutomaticDevice(
-                devices: AudioInputDeviceMonitor.shared.currentDevices(),
-                priorityOrder: order
-            ) {
-                return cached.uid
-            }
-            return resolvedAutomaticDevice(
-                devices: AudioInputDeviceMonitor.shared.refreshSynchronously(),
-                priorityOrder: order
-            )?.uid
-        }
+        let devices = cachedDevicesOrRefresh()
+        return resolvedDevice(devices: devices)?.uid
+    }
+
+    static func selectedUID() -> String {
+        UserDefaults.standard.string(forKey: selectedUIDKey) ?? ""
+    }
+
+    static func backupUID() -> String {
+        UserDefaults.standard.string(forKey: backupUIDKey) ?? ""
     }
 
     static func resolvedDevice(devices: [AudioInputDevice]) -> AudioInputDevice? {
-        switch selectionMode() {
-        case .systemDefault:
+        let primaryUID = selectedUID()
+        guard !primaryUID.isEmpty else {
             return nil
-        case .manual:
-            let selectedUID = UserDefaults.standard.string(forKey: selectedUIDKey) ?? ""
-            return devices.first { $0.uid == selectedUID }
-        case .automatic:
-            return resolvedAutomaticDevice(devices: devices, priorityOrder: priorityOrder())
         }
-    }
 
-    static func resolvedAutomaticDevice(
-        devices: [AudioInputDevice],
-        priorityOrder: [AudioInputDeviceCategory]
-    ) -> AudioInputDevice? {
-        let order = normalizedPriorityOrder(priorityOrder)
-        for category in order {
-            if let device = devices.first(where: { $0.category == category }) {
-                return device
-            }
+        if let primary = devices.first(where: { $0.uid == primaryUID }) {
+            return primary
         }
+
+        let fallbackUID = backupUID()
+        if !fallbackUID.isEmpty {
+            return devices.first { $0.uid == fallbackUID }
+        }
+
         return nil
     }
 
-    private static func normalizedPriorityOrder(_ order: [AudioInputDeviceCategory]) -> [AudioInputDeviceCategory] {
-        var result: [AudioInputDeviceCategory] = []
-        for category in order where !result.contains(category) {
-            result.append(category)
+    private static func cachedDevicesOrRefresh() -> [AudioInputDevice] {
+        let cached = AudioInputDeviceMonitor.shared.currentDevices()
+        if !cached.isEmpty {
+            return cached
         }
-        for category in AudioInputDeviceCategory.defaultPriorityOrder where !result.contains(category) {
-            result.append(category)
-        }
-        return result
+        return AudioInputDeviceMonitor.shared.refreshSynchronously()
     }
 }
 

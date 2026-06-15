@@ -407,8 +407,14 @@ actor RecognitionSession {
 
         do {
             let selectedDeviceUID = AudioInputDevicePreferenceStore.resolvedCachedDeviceUID()
+            let primaryUID = AudioInputDevicePreferenceStore.selectedUID()
+            let backupUID = AudioInputDevicePreferenceStore.backupUID()
             audioEngine.selectedDeviceUID = selectedDeviceUID
-            DebugFileLogger.log("audio input selected uid=\(selectedDeviceUID ?? "system-default") mode=\(AudioInputDevicePreferenceStore.selectionMode().rawValue)")
+            DebugFileLogger.log(
+                "audio input selected uid=\(selectedDeviceUID ?? "system-default") " +
+                "primary=\(primaryUID.isEmpty ? "system-default" : primaryUID) " +
+                "backup=\(backupUID.isEmpty ? "system-default" : backupUID)"
+            )
             try audioEngine.start()
             NSLog("[Session] Audio engine started OK")
             DebugFileLogger.log("audio engine started OK")

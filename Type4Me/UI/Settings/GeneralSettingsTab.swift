@@ -23,9 +23,8 @@ struct GeneralSettingsTab: View, SettingsCardHelpers {
     @AppStorage("tf_preserveCJKLatinSpacing") private var preserveCJKLatinSpacing = true
     @AppStorage("tf_hoverTranscriptPreview") private var hoverTranscriptPreview = true
     @AppStorage("tf_micKeepAlive") private var micKeepAlive = false
-    @AppStorage(AudioInputDevicePreferenceStore.selectionModeKey) private var microphoneSelectionMode = AudioInputDeviceSelectionMode.systemDefault.rawValue
-    @AppStorage("tf_selectedMicrophoneUID") private var selectedMicrophoneUID = ""
-    @AppStorage(AudioInputDevicePreferenceStore.priorityOrderKey) private var microphonePriorityOrder = AudioInputDevicePreferenceStore.defaultPriorityOrderStorageValue
+    @AppStorage(AudioInputDevicePreferenceStore.selectedUIDKey) private var selectedMicrophoneUID = ""
+    @AppStorage(AudioInputDevicePreferenceStore.backupUIDKey) private var backupMicrophoneUID = ""
     @AppStorage("tf_selectedSpeakerUID") private var selectedSpeakerUID = ""
 
     @State private var hasMic = false
@@ -442,27 +441,42 @@ struct GeneralSettingsTab: View, SettingsCardHelpers {
                 .buttonStyle(.plain)
                 .help(L("刷新麦克风列表", "Refresh microphone list"))
             }
-            settingsSegmentedPicker(
-                selection: $microphoneSelectionMode,
-                options: AudioInputDeviceSelectionMode.allCases.map { ($0.rawValue, $0.displayName) }
-            )
 
-            switch AudioInputDeviceSelectionMode(rawValue: microphoneSelectionMode) ?? .systemDefault {
-            case .systemDefault:
-                microphoneHint(
-                    icon: "gearshape",
-                    text: L("跟随 macOS 当前默认输入设备。", "Use the current macOS default input device.")
+            settingsDropdown(
+                selection: $selectedMicrophoneUID,
+                options: microphoneOptions(
+                    systemLabel: L("系统默认", "System Default"),
+                    includeUnavailableUID: selectedMicrophoneUID
                 )
-            case .manual:
-                settingsDropdown(
-                    selection: $selectedMicrophoneUID,
-                    options: [("", L("选择设备", "Choose Device"))] + availableMicrophones.map {
-                        ($0.uid, "\($0.name) · \($0.category.displayName)")
+            )
+            .onChange(of: selectedMicrophoneUID) { _, newValue in
+                if newValue == backupMicrophoneUID {
+                    backupMicrophoneUID = ""
+                }
+            }
+
+            if !selectedMicrophoneUID.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L("备用麦克风", "Backup Microphone").uppercased())
+                        .font(.system(size: 10, weight: .semibold))
+                        .tracking(0.8)
+                        .foregroundStyle(TF.settingsTextTertiary)
+                    settingsDropdown(
+                        selection: $backupMicrophoneUID,
+                        options: microphoneOptions(
+                            systemLabel: L("系统默认", "System Default"),
+                            includeUnavailableUID: backupMicrophoneUID,
+                            excludingUID: selectedMicrophoneUID
+                        )
+                    )
+                    .onChange(of: backupMicrophoneUID) { _, newValue in
+                        if newValue == selectedMicrophoneUID {
+                            backupMicrophoneUID = ""
+                        }
                     }
-                )
-            case .automatic:
-                microphonePriorityEditor
-                microphoneAutoMatchSummary
+                }
+
+                microphoneResolutionSummary
             }
         }
         .padding(.vertical, 6)
@@ -472,63 +486,64 @@ struct GeneralSettingsTab: View, SettingsCardHelpers {
         let devices = AudioCaptureEngine.availableAudioInputDevices()
         availableMicrophones = devices
         AudioInputDeviceMonitor.shared.replaceCachedDevices(devices)
-        if microphoneSelectionMode == AudioInputDeviceSelectionMode.manual.rawValue,
-           !selectedMicrophoneUID.isEmpty,
-           !availableMicrophones.contains(where: { $0.uid == selectedMicrophoneUID }) {
-            selectedMicrophoneUID = ""
-        }
     }
 
-    private var microphonePriorityEditor: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(Array(currentMicrophonePriorityOrder.enumerated()), id: \.element.rawValue) { index, category in
-                HStack(spacing: 8) {
-                    Text("\(index + 1)")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 18, height: 18)
-                        .background(Circle().fill(TF.settingsNavActive))
-                    settingsDropdown(
-                        selection: priorityBinding(at: index),
-                        options: AudioInputDeviceCategory.defaultPriorityOrder.map { ($0.rawValue, $0.displayName) }
-                    )
-                }
-            }
+    private func microphoneOptions(
+        systemLabel: String,
+        includeUnavailableUID uid: String,
+        excludingUID excludedUID: String? = nil
+    ) -> [(value: String, label: String)] {
+        var options: [(value: String, label: String)] = [("", systemLabel)]
+        let excluded = excludedUID ?? ""
+        options.append(contentsOf: availableMicrophones
+            .filter { $0.uid != excluded }
+            .map { ($0.uid, microphoneDeviceLabel($0)) })
+
+        if !uid.isEmpty,
+           uid != excluded,
+           !options.contains(where: { $0.value == uid }) {
+            options.append((uid, L("已选设备（未连接）", "Selected device (offline)")))
         }
+
+        return options
     }
 
-    private var microphoneAutoMatchSummary: some View {
-        let matched = AudioInputDevicePreferenceStore.resolvedAutomaticDevice(
-            devices: availableMicrophones,
-            priorityOrder: currentMicrophonePriorityOrder
-        )
+    private func microphoneDeviceLabel(_ device: AudioInputDevice) -> String {
+        "\(device.name) · \(device.category.displayName)"
+    }
+
+    private var microphoneResolutionSummary: some View {
+        let primary = availableMicrophones.first { $0.uid == selectedMicrophoneUID }
+        let backup = availableMicrophones.first { $0.uid == backupMicrophoneUID }
+
+        if let primary {
+            return microphoneHint(
+                icon: "checkmark.circle.fill",
+                text: L("当前使用：\(primary.name)",
+                        "Current: \(primary.name)")
+            )
+        }
+
+        if let backup {
+            return microphoneHint(
+                icon: "arrow.triangle.branch",
+                text: L("主设备未连接，使用备用：\(backup.name)",
+                        "Primary unavailable; using backup: \(backup.name)")
+            )
+        }
+
+        if backupMicrophoneUID.isEmpty {
+            return microphoneHint(
+                icon: "gearshape",
+                text: L("主设备未连接，将回退到系统默认输入。",
+                        "Primary unavailable; falling back to system default.")
+            )
+        }
+
         return microphoneHint(
-            icon: matched == nil ? "gearshape" : "checkmark.circle.fill",
-            text: matched.map {
-                L("当前匹配：\($0.name)（\($0.category.displayName)）",
-                  "Current match: \($0.name) (\($0.category.displayName))")
-            } ?? L("当前没有匹配的设备，将回退到系统默认输入。",
-                   "No matching device is available; system default will be used.")
-        )
-    }
-
-    private var currentMicrophonePriorityOrder: [AudioInputDeviceCategory] {
-        AudioInputDevicePreferenceStore.priorityOrder(from: microphonePriorityOrder)
-    }
-
-    private func priorityBinding(at index: Int) -> Binding<String> {
-        Binding(
-            get: {
-                let order = currentMicrophonePriorityOrder
-                guard order.indices.contains(index) else { return AudioInputDeviceCategory.other.rawValue }
-                return order[index].rawValue
-            },
-            set: { newValue in
-                guard let newCategory = AudioInputDeviceCategory(rawValue: newValue) else { return }
-                var order = currentMicrophonePriorityOrder.filter { $0 != newCategory }
-                order.insert(newCategory, at: min(index, order.count))
-                microphonePriorityOrder = AudioInputDevicePreferenceStore.storageValue(for: order)
-            }
+            icon: "gearshape",
+            text: L("主设备和备用都未连接，将回退到系统默认输入。",
+                    "Primary and backup unavailable; falling back to system default.")
         )
     }
 
