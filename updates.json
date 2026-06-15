@@ -1,6 +1,17 @@
 {
-  "latest": "1.9.5",
+  "latest": "1.9.6",
   "releases": [
+    {
+      "version": "1.9.6",
+      "date": "2026-06-15",
+      "notes": "- 语音识别设置新增麦克风输入优先级：可指定多个输入设备，蓝牙等设备不可用时自动回退到下一个设备，最后跟随系统默认\n- 语音识别设置新增「中英文空格」开关，可按需保留或去除中文与英文/数字之间的空格\n- 保留中英文和数字之间的合理空格，同时继续清理 CJK 内部拼接产生的多余空格 (#186)\n- 修复 LLM 默认模型下保存/测试凭据按钮不可用的问题\n- LLM 请求复用客户端和 URLSession，减少重复初始化开销",
+      "cloud_dmg_url": "https://github.com/joewongjc/type4me/releases/download/v1.9.6/Type4Me-v1.9.6-cloud.dmg",
+      "cloud_dmg_size": 5816497,
+      "cloud_dmg_sha256": "a963fa5f563a30890b6133c997487115bb508fd6b4ba4679e015123298264ac3",
+      "local_dmg_url": "https://github.com/joewongjc/type4me/releases/download/v1.9.6/Type4Me-v1.9.6-local-apple-silicon.dmg",
+      "local_dmg_size": 714759480,
+      "local_dmg_sha256": "832a536f16da00e4f41f6d7fa7d41445a2cdf99754a252790f114b720182ef64"
+    },
     {
       "version": "1.9.5",
       "date": "2026-06-02",
