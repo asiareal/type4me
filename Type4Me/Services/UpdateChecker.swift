@@ -56,13 +56,17 @@ struct UpdateInfo: Codable, Identifiable {
         isLocalInstallation ? localDmgSHA256 : cloudDmgSHA256
     }
 
+    func dmgSize(isLocalInstallation: Bool) -> Int64? {
+        isLocalInstallation ? localDmgSize : cloudDmgSize
+    }
+
     /// Human-readable download size (e.g. "23.5 MB")
     var formattedSize: String? {
         formattedSize(isLocalInstallation: false)
     }
 
     func formattedSize(isLocalInstallation: Bool) -> String? {
-        let size = isLocalInstallation ? localDmgSize : cloudDmgSize
+        let size = dmgSize(isLocalInstallation: isLocalInstallation)
         guard let size else { return nil }
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file

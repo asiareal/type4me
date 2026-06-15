@@ -28,6 +28,8 @@ final class UpdateInfoTests: XCTestCase {
         )
         XCTAssertEqual(update.dmgSHA256(isLocalInstallation: false), "cloudhash")
         XCTAssertEqual(update.dmgSHA256(isLocalInstallation: true), "localhash")
+        XCTAssertEqual(update.dmgSize(isLocalInstallation: false), 1234)
+        XCTAssertEqual(update.dmgSize(isLocalInstallation: true), 5678)
         XCTAssertNotNil(update.formattedSize(isLocalInstallation: false))
         XCTAssertNotNil(update.formattedSize(isLocalInstallation: true))
     }
