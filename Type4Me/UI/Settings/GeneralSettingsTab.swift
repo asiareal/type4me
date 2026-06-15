@@ -859,7 +859,7 @@ private struct MicrophonePrioritySheet: View {
             }
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 5) {
                     if allEntries.isEmpty {
                         Text(L("当前没有可用输入设备。", "No input devices are currently available."))
                             .font(.system(size: 12))
@@ -926,8 +926,8 @@ private struct MicrophonePrioritySheet: View {
             return 52
         }
         let visibleRows = min(allEntries.count, 5)
-        let rowHeight: CGFloat = 38
-        let rowSpacing: CGFloat = 6
+        let rowHeight: CGFloat = 40
+        let rowSpacing: CGFloat = 5
         let verticalPadding: CGFloat = 12
         return CGFloat(visibleRows) * rowHeight
             + CGFloat(max(visibleRows - 1, 0)) * rowSpacing
@@ -943,43 +943,51 @@ private struct MicrophonePrioritySheet: View {
         let selectedIndex = orderedEntries.firstIndex(where: { $0.uid == entry.uid })
         let device = devices.first { $0.uid == entry.uid }
         return HStack(spacing: 8) {
-            if let selectedIndex {
-                Text("\(selectedIndex + 1)")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 22, height: 22)
-                    .background(Circle().fill(TF.settingsNavActive))
-            } else {
-                Image(systemName: "circle")
-                    .font(.system(size: 13))
+            HStack(spacing: 8) {
+                if let selectedIndex {
+                    Text("\(selectedIndex + 1)")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 22, height: 22)
+                        .background(Circle().fill(TF.settingsNavActive))
+                } else {
+                    Image(systemName: "circle")
+                        .font(.system(size: 13))
+                        .foregroundStyle(TF.settingsTextTertiary)
+                        .frame(width: 22, height: 22)
+                }
+
+                Text(device?.name ?? entry.name)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(TF.settingsText)
+                    .lineLimit(1)
+
+                Spacer(minLength: 8)
+
+                Text(device.map { $0.category.displayName } ?? L("未连接", "Offline"))
+                    .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(TF.settingsTextTertiary)
-                    .frame(width: 22, height: 22)
+                    .lineLimit(1)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(TF.settingsBg.opacity(0.72)))
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                toggleEntry(entry)
             }
 
-            Text(device?.name ?? entry.name)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(TF.settingsText)
-                .lineLimit(1)
-
-            Spacer(minLength: 8)
-
-            Text(device.map { $0.category.displayName } ?? L("未连接", "Offline"))
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(TF.settingsTextTertiary)
-                .lineLimit(1)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(Capsule().fill(TF.settingsBg.opacity(0.72)))
-
             if let selectedIndex {
-                iconButton("chevron.up", disabled: selectedIndex == 0) {
-                    moveEntry(from: selectedIndex, by: -1)
-                }
-                iconButton("chevron.down", disabled: selectedIndex == orderedEntries.count - 1) {
-                    moveEntry(from: selectedIndex, by: 1)
-                }
-                iconButton("minus.circle", disabled: false) {
-                    orderedEntries.remove(at: selectedIndex)
+                HStack(spacing: 2) {
+                    iconButton("chevron.up", disabled: selectedIndex == 0) {
+                        moveEntry(from: selectedIndex, by: -1)
+                    }
+                    iconButton("chevron.down", disabled: selectedIndex == orderedEntries.count - 1) {
+                        moveEntry(from: selectedIndex, by: 1)
+                    }
+                    iconButton("minus.circle", disabled: false) {
+                        orderedEntries.remove(at: selectedIndex)
+                    }
                 }
             } else {
                 iconButton("plus.circle", disabled: false) {
@@ -987,9 +995,9 @@ private struct MicrophonePrioritySheet: View {
                 }
             }
         }
-        .padding(.horizontal, 8)
-        .frame(height: 38)
-        .contentShape(Rectangle())
+        .padding(.leading, 8)
+        .padding(.trailing, 6)
+        .frame(height: 40)
         .background(
             RoundedRectangle(cornerRadius: 8)
                 .fill(selectedIndex == nil ? TF.settingsCardAlt.opacity(0.72) : TF.settingsCardAlt)
@@ -998,9 +1006,6 @@ private struct MicrophonePrioritySheet: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(selectedIndex == nil ? Color.clear : TF.settingsNavActive.opacity(0.22), lineWidth: 1)
         )
-        .onTapGesture {
-            toggleEntry(entry)
-        }
     }
 
     private func iconButton(_ systemName: String, disabled: Bool, action: @escaping () -> Void) -> some View {
@@ -1008,7 +1013,8 @@ private struct MicrophonePrioritySheet: View {
             Image(systemName: systemName)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(disabled ? TF.settingsTextTertiary.opacity(0.4) : TF.settingsTextTertiary)
-                .frame(width: 24, height: 24)
+                .frame(width: 32, height: 32)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(disabled)
