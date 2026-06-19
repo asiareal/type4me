@@ -52,6 +52,36 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(appState.barPhase, .processing)
     }
 
+    func testHiddenRecordingVisualDoesNotShowPanelUntilProcessing() {
+        let previousStyle = UserDefaults.standard.string(forKey: RecordingVisualStyle.storageKey)
+        UserDefaults.standard.set(RecordingVisualStyle.hidden.rawValue, forKey: RecordingVisualStyle.storageKey)
+        defer {
+            if let previousStyle {
+                UserDefaults.standard.set(previousStyle, forKey: RecordingVisualStyle.storageKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: RecordingVisualStyle.storageKey)
+            }
+        }
+
+        let appState = AppState()
+        var showCount = 0
+        var hideCount = 0
+        appState.onShowPanel = { showCount += 1 }
+        appState.onHidePanel = { hideCount += 1 }
+
+        appState.startRecording()
+        appState.markRecordingReady()
+
+        XCTAssertEqual(appState.barPhase, .recording)
+        XCTAssertEqual(showCount, 0)
+        XCTAssertEqual(hideCount, 1)
+
+        appState.stopRecording()
+
+        XCTAssertEqual(appState.barPhase, .processing)
+        XCTAssertEqual(showCount, 1)
+    }
+
     func testSetLiveTranscriptReplacesExistingConfirmedSegments() {
         let appState = AppState()
         appState.setLiveTranscript(

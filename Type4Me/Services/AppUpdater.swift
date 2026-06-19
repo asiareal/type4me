@@ -25,6 +25,7 @@ final class AppUpdater {
     private let logger = Logger(subsystem: "com.type4me", category: "AppUpdater")
     private var downloadSession: URLSession?
     private var downloadTask: URLSessionDownloadTask?
+    private var activeDownloadID: UUID?
     private var resumeData: Data?
     private var currentRelease: UpdateInfo?
     private var retryAttempt = 0
@@ -33,6 +34,7 @@ final class AppUpdater {
     private static let maxAutomaticRetryAttempts = 3
     private static let minimumDownloadResourceTimeout: TimeInterval = 2 * 60 * 60
     private static let minimumAssumedBytesPerSecond: Double = 128 * 1024
+    private nonisolated static let tooManyOpenFilesCode = 24
 
     // MARK: - Directories
 
@@ -64,6 +66,7 @@ final class AppUpdater {
         downloadedVersion = release.version
         retryAttempt = 0
         lastDownloadProgress = 0
+        resumeData = nil
         let url = release.downloadURL(isLocalInstallation: isLocalInstallation)
 
         // Ensure staging directory
@@ -73,15 +76,31 @@ final class AppUpdater {
     }
 
     func cancelDownload() {
-        downloadTask?.cancel(byProducingResumeData: { [weak self] data in
+        let cancelledDownloadID = activeDownloadID
+        let cancelledVersion = currentRelease?.version
+        let task = downloadTask
+        let session = downloadSession
+        downloadTask = nil
+        downloadSession = nil
+        activeDownloadID = nil
+        state = .idle
+
+        guard let task else {
+            session?.invalidateAndCancel()
+            return
+        }
+
+        task.cancel(byProducingResumeData: { [weak self] data in
             Task { @MainActor [weak self] in
-                self?.resumeData = data
+                guard let self,
+                      self.activeDownloadID == nil,
+                      self.currentRelease?.version == cancelledVersion,
+                      cancelledDownloadID != nil
+                else { return }
+                self.resumeData = data
             }
         })
-        downloadSession?.invalidateAndCancel()
-        downloadSession = nil
-        downloadTask = nil
-        state = .idle
+        session?.finishTasksAndInvalidate()
     }
 
     func retryDownload() {
@@ -188,6 +207,7 @@ final class AppUpdater {
         downloadedVersion = nil
         currentRelease = nil
         resumeData = nil
+        cleanupDownloadSession(cancel: true)
     }
 
     // MARK: - Download
@@ -198,6 +218,9 @@ final class AppUpdater {
     }
 
     private func startDownload(url: URL, release: UpdateInfo, resetProgress: Bool) {
+        cleanupDownloadSession(cancel: true)
+        let downloadID = UUID()
+        activeDownloadID = downloadID
         if resetProgress {
             lastDownloadProgress = 0
         }
@@ -207,7 +230,7 @@ final class AppUpdater {
             expectedBytes: release.dmgSize(isLocalInstallation: isLocalInstallation),
             onProgress: { [weak self] fraction in
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
+                    guard let self, self.activeDownloadID == downloadID else { return }
                     let clamped = min(max(fraction, 0), 1)
                     self.lastDownloadProgress = clamped
                     self.state = .downloading(progress: clamped)
@@ -215,10 +238,9 @@ final class AppUpdater {
             },
             onComplete: { [weak self] fileURL, _, error in
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    self.downloadSession?.finishTasksAndInvalidate()
-                    self.downloadSession = nil
-                    self.downloadTask = nil
+                    guard let self, self.activeDownloadID == downloadID else { return }
+                    self.activeDownloadID = nil
+                    self.cleanupDownloadSession(cancel: false)
 
                     if let error {
                         self.handleDownloadError(error)
@@ -239,6 +261,7 @@ final class AppUpdater {
         config.waitsForConnectivity = true
         config.allowsExpensiveNetworkAccess = true
         config.allowsConstrainedNetworkAccess = true
+        config.httpMaximumConnectionsPerHost = 2
         config.httpAdditionalHeaders = [
             "Accept": "application/octet-stream,*/*",
             "User-Agent": updaterUserAgent
@@ -269,8 +292,11 @@ final class AppUpdater {
         }
 
         if nsError.code == NSURLErrorCancelled { return } // User cancelled
-        if shouldAutomaticallyRetry(nsError), retryAttempt < Self.maxAutomaticRetryAttempts {
+        if shouldAutomaticallyRetry(nsError),
+           retryAttempt < Self.maxAutomaticRetryAttempts,
+           let retryVersion = currentRelease?.version {
             retryAttempt += 1
+            let scheduledRetryAttempt = retryAttempt
             let delay = retryDelay(for: retryAttempt)
             logger.warning("Update download failed with code \(nsError.code); retrying attempt \(self.retryAttempt) after \(delay, privacy: .public)s")
             state = .downloading(progress: lastDownloadProgress)
@@ -280,6 +306,9 @@ final class AppUpdater {
                 try? await Task.sleep(nanoseconds: nanoseconds)
                 guard let self, let release = self.currentRelease else { return }
                 guard case .downloading = self.state else { return }
+                guard self.retryAttempt == scheduledRetryAttempt,
+                      release.version == retryVersion
+                else { return }
                 self.startDownload(
                     url: release.downloadURL(isLocalInstallation: self.isLocalInstallation),
                     release: release,
@@ -292,7 +321,7 @@ final class AppUpdater {
         let hasResume = resumeData != nil
         let msg = hasResume
             ? L("下载中断，可以继续", "Download interrupted, can resume")
-            : downloadFailureMessage(for: nsError, fallback: error.localizedDescription)
+            : Self.downloadFailureMessage(for: nsError, fallback: error.localizedDescription)
         state = .failed(msg)
     }
 
@@ -366,7 +395,14 @@ final class AppUpdater {
         return false
     }
 
-    private func downloadFailureMessage(for error: NSError, fallback: String) -> String {
+    nonisolated static func downloadFailureMessage(for error: NSError, fallback: String) -> String {
+        if isTooManyOpenFiles(error) {
+            return L(
+                "系统打开文件过多，请完全退出 Type4Me 后重新打开再试；如果仍失败，请手动下载 DMG 安装",
+                "Too many files are open. Quit and reopen Type4Me, then try again; if it still fails, install the DMG manually"
+            )
+        }
+
         if error.domain == NSURLErrorDomain {
             switch error.code {
             case NSURLErrorTimedOut:
@@ -386,11 +422,32 @@ final class AppUpdater {
             }
         }
 
-        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError,
-           underlying.domain == NSURLErrorDomain {
-            return downloadFailureMessage(for: underlying, fallback: fallback)
+        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+            return Self.downloadFailureMessage(for: underlying, fallback: fallback)
         }
         return L("下载失败: \(fallback)", "Download failed: \(fallback)")
+    }
+
+    private nonisolated static func isTooManyOpenFiles(_ error: NSError) -> Bool {
+        if error.domain == NSPOSIXErrorDomain && error.code == tooManyOpenFilesCode {
+            return true
+        }
+        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+            return isTooManyOpenFiles(underlying)
+        }
+        return false
+    }
+
+    private func cleanupDownloadSession(cancel: Bool) {
+        if cancel {
+            downloadTask?.cancel()
+            downloadSession?.invalidateAndCancel()
+        } else {
+            downloadSession?.finishTasksAndInvalidate()
+        }
+        downloadTask = nil
+        downloadSession = nil
+        activeDownloadID = nil
     }
 
     private func installTargetURL() -> URL {

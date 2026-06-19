@@ -40,11 +40,30 @@ struct FloatingBarView<S: FloatingBarState>: View {
     @State private var doneStartDate: Date?
     @State private var isHovered = false
     @AppStorage("tf_hoverTranscriptPreview") private var hoverTranscriptPreview = true
+    @AppStorage(RecordingVisualStyle.storageKey) private var visualStyle = RecordingVisualStyle.defaultValue
 
     // MARK: - Transcript Popup
 
+    private var recordingVisualStyle: RecordingVisualStyle {
+        RecordingVisualStyle(rawValue: visualStyle) ?? .timeline
+    }
+
+    private var shouldRenderCapsule: Bool {
+        guard state.barPhase != .hidden else { return false }
+        if !recordingVisualStyle.showsRecordingPanel,
+           state.barPhase == .preparing || state.barPhase == .recording {
+            return false
+        }
+        return true
+    }
+
     private var showTranscriptPopup: Bool {
-        guard hoverTranscriptPreview, isHovered, state.barPhase == .recording, !state.segments.isEmpty else { return false }
+        guard recordingVisualStyle.showsRecordingPanel,
+              hoverTranscriptPreview,
+              isHovered,
+              state.barPhase == .recording,
+              !state.segments.isEmpty
+        else { return false }
         let textWidth = measureText(state.transcriptionText)
         return textWidth + 66 > TF.barWidth
     }
@@ -79,7 +98,7 @@ struct FloatingBarView<S: FloatingBarState>: View {
                     ))
             }
 
-            if state.barPhase != .hidden {
+            if shouldRenderCapsule {
                 capsuleBar
                 .transition(.asymmetric(
                     insertion: .scale(scale: 0.92).combined(with: .opacity),
@@ -97,6 +116,8 @@ struct FloatingBarView<S: FloatingBarState>: View {
         .padding(.bottom, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .animation(TF.springSnappy, value: state.barPhase != .hidden)
+        .animation(TF.springSnappy, value: shouldRenderCapsule)
+        .animation(TF.springSnappy, value: visualStyle)
         .animation(TF.springSnappy, value: showTranscriptPopup)
         .onChange(of: state.barPhase) { _, newPhase in
             handlePhaseChange(newPhase)
@@ -298,7 +319,8 @@ struct FloatingBarView<S: FloatingBarState>: View {
             Color(white: 0.08, opacity: 0.88)
 
             if state.barPhase == .recording {
-                AudioRipple(meter: state.audioLevel)
+                AudioRipple(meter: state.audioLevel, style: recordingVisualStyle)
+                    .id(recordingVisualStyle.rawValue)
                     .transition(.opacity)
             }
 
@@ -702,7 +724,7 @@ struct ProcessingProgress: View {
 struct AudioRipple: View {
 
     let meter: AudioLevelMeter
-    @AppStorage("tf_visualStyle") private var style = "timeline"
+    let style: RecordingVisualStyle
     @State private var smootherSlow = LevelSmoother(timeConstant: 0.8)
     @State private var smootherFast = LevelSmoother(timeConstant: 0)
     @State private var startTime: Double = 0
@@ -713,9 +735,9 @@ struct AudioRipple: View {
             let time = timeline.date.timeIntervalSinceReferenceDate
             Canvas { context, size in
                 switch style {
-                case "classic": drawClassicWaves(context: &context, size: size, time: time)
-                case "dual": drawDualSpine(context: &context, size: size, time: time)
-                default: drawTimeline(context: &context, size: size, time: time)
+                case .classic: drawClassicWaves(context: &context, size: size, time: time)
+                case .dual: drawDualSpine(context: &context, size: size, time: time)
+                case .timeline, .hidden: drawTimeline(context: &context, size: size, time: time)
                 }
             }
         }

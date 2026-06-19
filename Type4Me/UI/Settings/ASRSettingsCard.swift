@@ -161,8 +161,11 @@ struct ASRSettingsCard: View, SettingsCardHelpers {
 
                 HStack(spacing: 8) {
                     Spacer()
-                    testButton(L("测试连接", "Test"), status: asrTestStatus) { testASRConnection() }
-                        .disabled(!hasASRCredentials || !isASRProviderAvailable)
+                    testButton(
+                        L("测试连接", "Test"),
+                        status: asrTestStatus,
+                        isEnabled: hasASRCredentials && isASRProviderAvailable
+                    ) { testASRConnection() }
                     if isZeroCredentialProvider {
                         EmptyView()
                     } else if hasASRCredentials && !isEditingASR {

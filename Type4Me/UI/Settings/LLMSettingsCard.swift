@@ -70,8 +70,11 @@ struct LLMSettingsCard: View, SettingsCardHelpers {
 
             HStack(spacing: 8) {
                 Spacer()
-                testButton(L("测试连接", "Test"), status: llmTestStatus) { testLLMConnection() }
-                    .disabled(!hasLLMCredentials)
+                testButton(
+                    L("测试连接", "Test"),
+                    status: llmTestStatus,
+                    isEnabled: hasLLMCredentials
+                ) { testLLMConnection() }
                 if hasLLMCredentials && !isEditingLLM {
                     secondaryButton(L("修改", "Edit")) {
                         testTask?.cancel()

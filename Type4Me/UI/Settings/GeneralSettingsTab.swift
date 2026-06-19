@@ -14,7 +14,7 @@ struct GeneralSettingsTab: View, SettingsCardHelpers {
     @AppStorage("tf_startSound") private var startSound = StartSoundStyle.chime.rawValue
     @AppStorage("tf_launchAtLogin") private var launchAtLogin = true
     @AppStorage("tf_volumeReduction") private var volumeReduction = -1
-    @AppStorage("tf_visualStyle") private var visualStyle = "timeline"
+    @AppStorage(RecordingVisualStyle.storageKey) private var visualStyle = RecordingVisualStyle.defaultValue
     @AppStorage("tf_language") private var language = AppLanguage.systemDefault
     @AppStorage("tf_preserveClipboard") private var preserveClipboard = true
     @AppStorage("tf_showDockIcon") private var showDockIcon = true
@@ -317,13 +317,9 @@ struct GeneralSettingsTab: View, SettingsCardHelpers {
                 .font(.system(size: 10, weight: .semibold))
                 .tracking(0.8)
                 .foregroundStyle(TF.settingsTextTertiary)
-            settingsSegmentedPicker(
+            settingsDropdown(
                 selection: $visualStyle,
-                options: [
-                    ("classic", L("线条", "Lines")),
-                    ("dual", L("粒子云", "Blocks")),
-                    ("timeline", L("电平", "Minimal")),
-                ]
+                options: RecordingVisualStyle.allCases.map { ($0.rawValue, $0.displayName) }
             )
         }
         .padding(.vertical, 6)

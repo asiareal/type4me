@@ -53,6 +53,25 @@ final class UpdateInfoTests: XCTestCase {
         )
     }
 
+    func testDownloadFailureMessageExplainsTooManyOpenFiles() {
+        let posix = NSError(domain: NSPOSIXErrorDomain, code: 24)
+        let urlError = NSError(
+            domain: NSURLErrorDomain,
+            code: NSURLErrorCannotOpenFile,
+            userInfo: [NSUnderlyingErrorKey: posix]
+        )
+
+        let message = AppUpdater.downloadFailureMessage(
+            for: urlError,
+            fallback: "Too many open files"
+        )
+
+        XCTAssertTrue(
+            message.contains("打开文件过多") || message.contains("Too many files"),
+            message
+        )
+    }
+
     private func decodeUpdate(_ json: String) throws -> UpdateInfo {
         try JSONDecoder().decode(UpdateInfo.self, from: Data(json.utf8))
     }

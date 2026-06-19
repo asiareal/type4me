@@ -1,6 +1,17 @@
 {
-  "latest": "1.9.6",
+  "latest": "1.9.7",
   "releases": [
+    {
+      "version": "1.9.7",
+      "date": "2026-06-19",
+      "notes": "- 修复旧版本升级后 ASR/LLM 凭证可能无法保存、测试/保存按钮不可用的问题\n- 修复测试连接失败时，长错误信息不再撑坏按钮布局\n- 修复单修饰键快捷键与组合修饰键冲突时，较短快捷键提前触发导致录音浮窗不出现或录音内容丢失的问题\n- 修复快捷键录制时无法保留 Fn 组合键的问题，支持 Fn+Space 等组合\n- 修复录音动效设置不生效的问题，并新增「关闭」录音动效选项\n- 改进应用内更新下载失败提示；遇到系统 “too many open files” 时给出明确重启/手动安装建议\n- 忽略火山 ASR HTTP 探测产生的误导性 WebSocket upgrade 报错",
+      "cloud_dmg_url": "https://github.com/joewongjc/type4me/releases/download/v1.9.7/Type4Me-v1.9.7-cloud.dmg",
+      "cloud_dmg_size": 5888374,
+      "cloud_dmg_sha256": "2299f2307bd1e0e3cd44f8da98b9464a6258b7869b2917362988e65e471c905a",
+      "local_dmg_url": "https://github.com/joewongjc/type4me/releases/download/v1.9.7/Type4Me-v1.9.7-local-apple-silicon.dmg",
+      "local_dmg_size": 714222873,
+      "local_dmg_sha256": "7317e8704a6c569260ad544990a34f64da419f8b464b1ce6675d03f73d5ca57f"
+    },
     {
       "version": "1.9.6",
       "date": "2026-06-15",

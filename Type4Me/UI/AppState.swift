@@ -11,6 +11,34 @@ enum FloatingBarPhase: Equatable {
     case error
 }
 
+enum RecordingVisualStyle: String, CaseIterable {
+    static let storageKey = "tf_visualStyle"
+    static let defaultValue = Self.timeline.rawValue
+
+    case classic
+    case dual
+    case timeline
+    case hidden
+
+    var displayName: String {
+        switch self {
+        case .classic: return L("线条", "Lines")
+        case .dual: return L("粒子云", "Particles")
+        case .timeline: return L("电平", "Levels")
+        case .hidden: return L("关闭", "Off")
+        }
+    }
+
+    var showsRecordingPanel: Bool { self != .hidden }
+
+    static func current(userDefaults: UserDefaults = .standard) -> Self {
+        guard let raw = userDefaults.string(forKey: storageKey),
+              let style = Self(rawValue: raw)
+        else { return .timeline }
+        return style
+    }
+}
+
 /// Visual variant of the floating-bar feedback. Lets the bar prepend a status
 /// icon (and tint the border) without introducing additional phases — the phase
 /// machine still drives layout, this just modulates the look of `.done`/`.error`.
@@ -767,7 +795,11 @@ final class AppState {
         feedbackKind = .standard
         processingLabelOverride = nil
         barPhase = .preparing
-        onShowPanel?()
+        if RecordingVisualStyle.current().showsRecordingPanel {
+            onShowPanel?()
+        } else {
+            onHidePanel?()
+        }
     }
 
     func markRecordingReady() {
@@ -787,6 +819,7 @@ final class AppState {
                 processingLabelOverride = L("校准中", "Calibrating")
             }
             barPhase = .processing
+            onShowPanel?()
         default:
             break
         }

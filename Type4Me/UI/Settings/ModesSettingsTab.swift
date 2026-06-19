@@ -110,6 +110,20 @@ struct ModesSettingsTab: View {
                         (other.hotkeyModifiers ?? 0) == m
                     }
                 },
+                checkPrefixConflict: { code, mods in
+                    guard let code else { return nil }
+                    return modes.first { other in
+                        guard other.id != target.id,
+                              let otherCode = other.hotkeyCode
+                        else { return false }
+                        return ModeBinding.hasModifierPrefixConflict(
+                            keyCode: code,
+                            modifiers: mods,
+                            otherKeyCode: otherCode,
+                            otherModifiers: other.hotkeyModifiers
+                        )
+                    }
+                },
                 onConfirm: { code, mods, style in
                     let m = mods ?? 0
                     if let conflictIdx = modes.firstIndex(where: {
@@ -512,6 +526,7 @@ private struct HotkeyRecordingSheet: View {
 
     let target: RecordingTarget
     let checkConflict: (Int?, UInt64?) -> ProcessingMode?
+    let checkPrefixConflict: (Int?, UInt64?) -> ProcessingMode?
     let onConfirm: (Int, UInt64?, ProcessingMode.HotkeyStyle) -> Void
     let onCancel: () -> Void
 
@@ -527,11 +542,13 @@ private struct HotkeyRecordingSheet: View {
     init(
         target: RecordingTarget,
         checkConflict: @escaping (Int?, UInt64?) -> ProcessingMode?,
+        checkPrefixConflict: @escaping (Int?, UInt64?) -> ProcessingMode?,
         onConfirm: @escaping (Int, UInt64?, ProcessingMode.HotkeyStyle) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.target = target
         self.checkConflict = checkConflict
+        self.checkPrefixConflict = checkPrefixConflict
         self.onConfirm = onConfirm
         self.onCancel = onCancel
         _hotkeyStyle = State(initialValue: target.currentStyle)
@@ -539,6 +556,11 @@ private struct HotkeyRecordingSheet: View {
 
     private var conflict: ProcessingMode? {
         checkConflict(capturedKeyCode, capturedModifiers)
+    }
+
+    private var prefixConflict: ProcessingMode? {
+        guard conflict == nil else { return nil }
+        return checkPrefixConflict(capturedKeyCode, capturedModifiers)
     }
 
     var body: some View {
@@ -588,6 +610,20 @@ private struct HotkeyRecordingSheet: View {
                         .font(.system(size: 11))
                 }
                 .foregroundStyle(TF.settingsAccentAmber)
+            }
+
+            if let prefixConflict {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10))
+                    Text(L(
+                        "与「\(prefixConflict.name)」存在前缀冲突；「\(target.name)」触发将改为抬起按键时触发，速度稍慢、手感变差",
+                        "Prefix conflict with \"\(prefixConflict.name)\". \"\(target.name)\" will trigger when the key is released, which is slightly slower and less responsive"
+                    ))
+                    .font(.system(size: 11))
+                }
+                .foregroundStyle(TF.settingsAccentAmber)
+                .fixedSize(horizontal: false, vertical: true)
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -667,7 +703,7 @@ private struct HotkeyRecordingSheet: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(TF.settingsTextSecondary)
 
-                Button(L("确认", "Confirm")) {
+                Button(prefixConflict == nil ? L("确认", "Confirm") : L("仍要设置", "Set Anyway")) {
                     guard let code = capturedKeyCode else { return }
                     cleanup()
                     onConfirm(code, capturedModifiers, hotkeyStyle)
@@ -816,7 +852,7 @@ private struct HotkeyRecordingSheet: View {
     }
 
     private func sanitizedModifierFlags(_ flags: NSEvent.ModifierFlags) -> NSEvent.ModifierFlags {
-        flags.intersection([.command, .shift, .option, .control])
+        flags.intersection([.command, .shift, .option, .control, .function])
     }
 
     private func modifierFlag(for keyCode: Int) -> NSEvent.ModifierFlags? {
@@ -825,6 +861,7 @@ private struct HotkeyRecordingSheet: View {
         case 56, 60: return .shift
         case 58, 61: return .option
         case 59, 62: return .control
+        case 63: return .function
         default: return nil
         }
     }

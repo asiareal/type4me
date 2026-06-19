@@ -29,6 +29,14 @@ struct ModeBinding {
 
     private static let mouseKeyCodeBase = 0x8000
     private static let mediaKeyCodeBase = 0x9000
+    static let modifierKeyCodes: Set<Int> = [54, 55, 56, 58, 59, 60, 61, 62, 63]
+    static let standardModifierMask: CGEventFlags = [
+        .maskCommand,
+        .maskShift,
+        .maskAlternate,
+        .maskControl,
+        .maskSecondaryFn,
+    ]
 
     /// Encode a mouse button number as a keyCode (for storage in ProcessingMode.hotkeyCode).
     static func mouseKeyCode(for buttonNumber: Int) -> Int { mouseKeyCodeBase + buttonNumber }
@@ -55,6 +63,80 @@ struct ModeBinding {
 
     /// Check if a keyCode represents a media key.
     static func isMediaKeyCode(_ keyCode: Int) -> Bool { keyCode >= mediaKeyCodeBase }
+
+    static func isModifierKeyCode(_ keyCode: Int) -> Bool {
+        modifierKeyCodes.contains(keyCode)
+    }
+
+    static func modifierEventFlag(for keyCode: Int) -> CGEventFlags? {
+        switch keyCode {
+        case 54, 55: return .maskCommand
+        case 56, 60: return .maskShift
+        case 58, 61: return .maskAlternate
+        case 59, 62: return .maskControl
+        case 63: return .maskSecondaryFn
+        default: return nil
+        }
+    }
+
+    static func normalizedModifierFlags(_ flags: CGEventFlags) -> CGEventFlags {
+        flags.intersection(standardModifierMask)
+    }
+
+    static func fullModifierFlags(keyCode: Int, modifiers: UInt64?) -> CGEventFlags? {
+        guard let ownFlag = modifierEventFlag(for: keyCode) else { return nil }
+        var flags = normalizedModifierFlags(CGEventFlags(rawValue: modifiers ?? 0))
+        flags.insert(ownFlag)
+        return flags
+    }
+
+    static func modifierBindingIsPrefix(
+        modifierKeyCode: Int,
+        modifierModifiers: UInt64?,
+        otherKeyCode: Int,
+        otherModifiers: UInt64?
+    ) -> Bool {
+        guard let flags = fullModifierFlags(keyCode: modifierKeyCode, modifiers: modifierModifiers) else {
+            return false
+        }
+
+        if let otherFlags = fullModifierFlags(keyCode: otherKeyCode, modifiers: otherModifiers) {
+            return flags != otherFlags && flags.isSubset(of: otherFlags)
+        }
+
+        guard let regularFlags = regularKeyModifierFlags(keyCode: otherKeyCode, modifiers: otherModifiers) else {
+            return false
+        }
+        return flags.isSubset(of: regularFlags)
+    }
+
+    static func hasModifierPrefixConflict(
+        keyCode: Int,
+        modifiers: UInt64?,
+        otherKeyCode: Int,
+        otherModifiers: UInt64?
+    ) -> Bool {
+        modifierBindingIsPrefix(
+            modifierKeyCode: keyCode,
+            modifierModifiers: modifiers,
+            otherKeyCode: otherKeyCode,
+            otherModifiers: otherModifiers
+        ) || modifierBindingIsPrefix(
+            modifierKeyCode: otherKeyCode,
+            modifierModifiers: otherModifiers,
+            otherKeyCode: keyCode,
+            otherModifiers: modifiers
+        )
+    }
+
+    private static func regularKeyModifierFlags(keyCode: Int, modifiers: UInt64?) -> CGEventFlags? {
+        guard !isMouseKeyCode(keyCode),
+              !isMediaKeyCode(keyCode),
+              !isModifierKeyCode(keyCode)
+        else { return nil }
+        let flags = normalizedModifierFlags(CGEventFlags(rawValue: modifiers ?? 0))
+        return flags.isEmpty ? nil : flags
+    }
 }
 
 final class HotkeyManager: NSObject {
@@ -68,9 +150,15 @@ final class HotkeyManager: NSObject {
     private var holdSafetyTimers: [UUID: Timer] = [:]
     /// Which toggle mode is currently active (recording). Only one can be active at a time.
     private var activeToggleModeId: UUID?
+    private struct PendingModifierTrigger {
+        let binding: ModeBinding
+        let token: UUID
+    }
+    private var pendingModifierTriggers: [UUID: PendingModifierTrigger] = [:]
 
     /// Maximum hold duration before auto-stop (seconds).
     private let maxHoldDuration: TimeInterval = 120
+    private let modifierPrefixTriggerDelay: TimeInterval = 0.12
 
     // MARK: - State
 
@@ -89,6 +177,7 @@ final class HotkeyManager: NSObject {
         activeToggleModeId = nil
         for key in toggleState.keys { toggleState[key] = false }
         for key in holdState.keys { holdState[key] = false }
+        cancelPendingModifierTriggers()
     }
 
     /// Called when recording is stopped by a different mode's hotkey.
@@ -120,6 +209,7 @@ final class HotkeyManager: NSObject {
         wasModifierDown = [:]
         holdSafetyTimers.values.forEach { $0.invalidate() }
         holdSafetyTimers = [:]
+        cancelPendingModifierTriggers()
         updateMediaKeySession()
     }
 
@@ -204,6 +294,7 @@ final class HotkeyManager: NSObject {
         wasModifierDown = [:]
         holdSafetyTimers.values.forEach { $0.invalidate() }
         holdSafetyTimers = [:]
+        cancelPendingModifierTriggers()
     }
 
     // MARK: - Health check
@@ -360,6 +451,9 @@ final class HotkeyManager: NSObject {
 
         // MARK: Keyboard events
         let keyCode = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
+        if type == .keyDown {
+            cancelPendingModifierTriggers()
+        }
 
         for binding in bindings {
             // Skip mouse button and media key bindings in the keyboard path
@@ -376,7 +470,14 @@ final class HotkeyManager: NSObject {
                     let requiredMods = normalizedModifierFlags(binding.modifiers)
                     let currentMods = otherModifierFlags(for: keyCode, flags: event.flags)
                     guard currentMods == requiredMods else { continue }
-                    handleBindingEvent(binding: binding, pressed: true)
+                    if shouldDeferModifierTrigger(for: binding) {
+                        schedulePendingModifierTrigger(for: binding)
+                    } else {
+                        cancelPendingModifierTriggers()
+                        handleBindingEvent(binding: binding, pressed: true)
+                    }
+                    return Unmanaged.passUnretained(event)
+                } else if consumePendingModifierRelease(for: binding) {
                     return Unmanaged.passUnretained(event)
                 } else if isModifierBindingActive(binding) {
                     // Always release active state even if other modifiers were released first.
@@ -491,6 +592,70 @@ final class HotkeyManager: NSObject {
         }
     }
 
+    // MARK: - Modifier Prefix Conflicts
+
+    private func shouldDeferModifierTrigger(for binding: ModeBinding) -> Bool {
+        guard isModifierKeyCode(binding.keyCode) else { return false }
+
+        return bindings.contains { other in
+            guard other.modeId != binding.modeId,
+                  !other.isMouseButton,
+                  !other.isMediaKey
+            else { return false }
+            return ModeBinding.modifierBindingIsPrefix(
+                modifierKeyCode: Int(binding.keyCode),
+                modifierModifiers: binding.modifiers.rawValue,
+                otherKeyCode: Int(other.keyCode),
+                otherModifiers: other.modifiers.rawValue
+            )
+        }
+    }
+
+    private func schedulePendingModifierTrigger(for binding: ModeBinding) {
+        cancelPendingModifierTriggers(except: binding.modeId)
+        let token = UUID()
+        pendingModifierTriggers[binding.modeId] = PendingModifierTrigger(binding: binding, token: token)
+        DispatchQueue.main.asyncAfter(deadline: .now() + modifierPrefixTriggerDelay) { [weak self] in
+            self?.firePendingModifierTrigger(modeId: binding.modeId, token: token)
+        }
+    }
+
+    private func firePendingModifierTrigger(modeId: UUID, token: UUID) {
+        guard let pending = pendingModifierTriggers[modeId],
+              pending.token == token,
+              isExactModifierComboActive(for: pending.binding)
+        else { return }
+        pendingModifierTriggers.removeValue(forKey: modeId)
+        handleBindingEvent(binding: pending.binding, pressed: true)
+    }
+
+    private func consumePendingModifierRelease(for binding: ModeBinding) -> Bool {
+        guard let pending = pendingModifierTriggers.removeValue(forKey: binding.modeId) else { return false }
+        handleBindingEvent(binding: pending.binding, pressed: true)
+        handleBindingEvent(binding: pending.binding, pressed: false)
+        return true
+    }
+
+    private func cancelPendingModifierTriggers(except modeId: UUID? = nil) {
+        let ids = pendingModifierTriggers.keys.filter { $0 != modeId }
+        for id in ids {
+            pendingModifierTriggers.removeValue(forKey: id)
+        }
+    }
+
+    private func isExactModifierComboActive(for binding: ModeBinding) -> Bool {
+        guard let expected = ModeBinding.fullModifierFlags(
+            keyCode: Int(binding.keyCode),
+            modifiers: binding.modifiers.rawValue
+        ) else { return false }
+        let stateFlags = CGEventSource.flagsState(.combinedSessionState)
+        var current = normalizedModifierFlags(stateFlags)
+        if stateFlags.contains(.maskSecondaryFn) {
+            current.insert(.maskSecondaryFn)
+        }
+        return current == expected
+    }
+
     // MARK: - Safety Timer
 
     private func startSafetyTimer(for binding: ModeBinding) {
@@ -560,22 +725,15 @@ final class HotkeyManager: NSObject {
     }
 
     private func isModifierKeyCode(_ keyCode: CGKeyCode) -> Bool {
-        [54, 55, 56, 58, 59, 60, 61, 62, 63].contains(keyCode)
+        ModeBinding.isModifierKeyCode(Int(keyCode))
     }
 
     private func normalizedModifierFlags(_ flags: CGEventFlags) -> CGEventFlags {
-        flags.intersection([.maskCommand, .maskShift, .maskAlternate, .maskControl])
+        ModeBinding.normalizedModifierFlags(flags)
     }
 
     private func modifierEventFlag(for keyCode: CGKeyCode) -> CGEventFlags? {
-        switch keyCode {
-        case 54, 55: return .maskCommand
-        case 56, 60: return .maskShift
-        case 58, 61: return .maskAlternate
-        case 59, 62: return .maskControl
-        case 63: return .maskSecondaryFn
-        default: return nil
-        }
+        ModeBinding.modifierEventFlag(for: Int(keyCode))
     }
 
     private func otherModifierFlags(for keyCode: CGKeyCode, flags: CGEventFlags) -> CGEventFlags {
