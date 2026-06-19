@@ -1,6 +1,17 @@
 {
-  "latest": "1.9.7",
+  "latest": "1.9.8",
   "releases": [
+    {
+      "version": "1.9.8",
+      "date": "2026-06-19",
+      "notes": "- 减少录音中提前润色的无意义 LLM 请求：过短文本、小幅增量和并发中的重复请求会被节流\n- 最终 ASR 与提前润色输入只有空白、标点或尾部标点差异时，可复用已有 LLM 结果\n- 新增提前润色复用判断与请求节流的单元测试",
+      "cloud_dmg_url": "https://github.com/joewongjc/type4me/releases/download/v1.9.8/Type4Me-v1.9.8-cloud.dmg",
+      "cloud_dmg_size": 5912474,
+      "cloud_dmg_sha256": "810fa4d98558f7bbdd953aa53c3dcba121cbe5f2fb08b77638a8c8453a7cef7f",
+      "local_dmg_url": "https://github.com/joewongjc/type4me/releases/download/v1.9.8/Type4Me-v1.9.8-local-apple-silicon.dmg",
+      "local_dmg_size": 714230064,
+      "local_dmg_sha256": "e811e4a4cc5b0375fc0e6994efdf4a37ad87b2628fe0390c27a139cc51dfb5c7"
+    },
     {
       "version": "1.9.7",
       "date": "2026-06-19",

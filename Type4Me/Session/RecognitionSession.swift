@@ -220,6 +220,7 @@ actor RecognitionSession {
     private var speculativeLLMTask: Task<String?, Never>?
     private var speculativeLLMText: String = ""
     private var speculativeDebounceTask: Task<Void, Never>?
+    private var speculativeThrottle = SpeculativeLLMThrottle()
     /// Stores the last LLM error from the early/fresh LLM task, consumed once by stopRecording().
     private var pendingLLMError: Error?
     /// When true, skip text injection (paste) but still save to clipboard & history.
@@ -285,6 +286,7 @@ actor RecognitionSession {
         self.recordingStartTime = nil
         hasEmittedReadyForCurrentSession = false
         injectionAborted = false
+        speculativeThrottle.reset()
         pendingLLMError = nil
         lastStreamingError = nil
         state = .starting
@@ -844,10 +846,13 @@ actor RecognitionSession {
                 onASREvent?(.processingLabelOverride(L("校准中", "Calibrating")))
             }
 
-            DebugFileLogger.log("stop: needsLLM=\(needsLLM) mode=\(currentMode.name) text=\(finalASRText.count)chars specMatch=\(finalASRText == speculativeLLMText)")
+            let speculativeDiff = TranscriptDiff.classify(source: speculativeLLMText, final: finalASRText)
+            DebugFileLogger.log(
+                "stop: needsLLM=\(needsLLM) mode=\(currentMode.name) text=\(finalASRText.count)chars specDiff=\(speculativeDiff.type.rawValue)"
+            )
             if needsLLM && !finalASRText.isEmpty {
-                if finalASRText == speculativeLLMText, let specTask = speculativeLLMTask {
-                    // Final transcript matches speculative input — reuse (may already be done!)
+                if speculativeDiff.canReuseLLMResult, let specTask = speculativeLLMTask {
+                    // Final transcript is semantically equivalent to speculative input — reuse (may already be done!)
                     earlyLLMTask = specTask
                     state = .postProcessing
                     DebugFileLogger.log("stop: reusing speculative LLM +\(ContinuousClock.now - stopT0)")
@@ -1366,23 +1371,54 @@ actor RecognitionSession {
         #if HAS_CLOUD_SUBSCRIPTION
         if isCloudMode { return }
         #endif
-        speculativeDebounceTask?.cancel()
-        speculativeDebounceTask = Task {
-            try? await Task.sleep(for: .milliseconds(800))
-            guard !Task.isCancelled, state == .recording else { return }
-            await fireSpeculativeLLM()
-        }
-    }
-
-    private func fireSpeculativeLLM() async {
         var text = currentTranscript.composedText
             .trimmingCharacters(in: .whitespacesAndNewlines)
         text = SnippetStorage.applyEffective(to: text, bundleId: targetBundleId)
-        guard !text.isEmpty, text != speculativeLLMText else { return }
-        guard let llmConfig = loadEffectiveLLMConfig() else { return }
+        scheduleSpeculativeLLM(text: text)
+    }
 
-        // Cancel previous speculative call if text changed
-        speculativeLLMTask?.cancel()
+    private func scheduleSpeculativeLLM(text: String) {
+        guard state == .recording else { return }
+        switch speculativeThrottle.submit(text) {
+        case .tooShort:
+            DebugFileLogger.log("speculative LLM: skipped reason=tooShort len=\(text.count)")
+            speculativeDebounceTask?.cancel()
+            speculativeDebounceTask = nil
+            return
+        case .duplicate:
+            DebugFileLogger.log("speculative LLM: skipped reason=duplicate len=\(text.count)")
+            speculativeDebounceTask?.cancel()
+            speculativeDebounceTask = nil
+            return
+        case .deltaTooSmall:
+            DebugFileLogger.log(
+                "speculative LLM: skipped reason=deltaTooSmall len=\(text.count) last=\(speculativeThrottle.lastStartedText.count)"
+            )
+            speculativeDebounceTask?.cancel()
+            speculativeDebounceTask = nil
+            return
+        case .queued:
+            DebugFileLogger.log("speculative LLM: queued pending len=\(text.count)")
+            return
+        case .debounce:
+            break
+        }
+
+        speculativeDebounceTask?.cancel()
+        speculativeDebounceTask = Task { [text] in
+            try? await Task.sleep(for: SpeculativeLLMThrottle.debounceDuration)
+            guard !Task.isCancelled, state == .recording else { return }
+            await fireSpeculativeLLM(text: text)
+        }
+    }
+
+    private func fireSpeculativeLLM(text: String) async {
+        guard speculativeThrottle.beginDebouncedRequest(for: text) else { return }
+        guard let llmConfig = loadEffectiveLLMConfig() else {
+            _ = speculativeThrottle.requestCompleted(input: text)
+            return
+        }
+
         speculativeLLMText = text
         let prompt = promptContext.expandContextVariables(currentMode.prompt)
 
@@ -1393,9 +1429,19 @@ actor RecognitionSession {
                 let result = try await client.process(
                     text: text, prompt: prompt, config: llmConfig
                 )
+                guard !Task.isCancelled else {
+                    _ = self.speculativeThrottle.requestCompleted(input: text)
+                    return nil
+                }
                 DebugFileLogger.log("speculative LLM: done \(result.count) chars")
+                if let pending = self.speculativeThrottle.requestCompleted(input: text),
+                   self.state == .recording {
+                    self.scheduleSpeculativeLLM(text: pending)
+                }
                 return result
             } catch {
+                _ = self.speculativeThrottle.requestCompleted(input: text)
+                guard !Task.isCancelled else { return nil }
                 DebugFileLogger.log("speculative LLM: failed \(error)")
                 self.setPendingLLMError(error)
                 return nil
@@ -1419,6 +1465,7 @@ actor RecognitionSession {
         speculativeLLMTask?.cancel()
         speculativeLLMTask = nil
         speculativeLLMText = ""
+        speculativeThrottle.reset()
     }
 
     // MARK: - Timeout Helper
