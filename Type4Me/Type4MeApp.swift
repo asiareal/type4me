@@ -54,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let permissionGuideModel = PermissionGuideModel()
     /// Computed dynamically per recording based on audio device topology.
     private var floatingBarController: FloatingBarController?
+    private let selectionAskController = SelectionAskController()
     private let hotkeyManager = HotkeyManager()
     private let session = RecognitionSession()
 
@@ -153,6 +154,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         self.safeResetHotkeyState()
                     case .macActionResult(let message, let status):
                         appState.showMacActionResult(message: message, status: status)
+                        self.hotkeyManager.isProcessing = false
+                        self.safeResetHotkeyState()
+                    case .selectionAskStarted(let question, let selectedText):
+                        appState.cancel()
+                        self.selectionAskController.begin(question: question, selectedText: selectedText)
+                        self.hotkeyManager.isProcessing = true
+                    case .selectionAskAnswerDelta(let delta):
+                        self.selectionAskController.appendAnswerDelta(delta)
+                    case .selectionAskAnswerCompleted:
+                        self.selectionAskController.completeAnswer()
                         self.hotkeyManager.isProcessing = false
                         self.safeResetHotkeyState()
                     case .error(let error):
