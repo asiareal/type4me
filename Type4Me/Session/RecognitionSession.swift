@@ -649,15 +649,6 @@ actor RecognitionSession {
         let contextSource = SelectionAskPromptBuilder.contextSource(from: promptContext)
         let contextText = SelectionAskPromptBuilder.contextText(from: promptContext)
 
-        guard !contextText.isEmpty else {
-            onASREvent?(.selectionAskStarted(question: question, selectedText: ""))
-            onASREvent?(.selectionAskAnswerDelta(L("未读取到选中文本或剪贴板内容，请重新选中文本或复制内容后再试。", "No selected text or clipboard content was found. Please select text or copy content and try again.")))
-            onASREvent?(.selectionAskAnswerCompleted)
-            onASREvent?(.completed)
-            finishSelectionAskSession(myGeneration: myGeneration)
-            return
-        }
-
         guard !question.isEmpty else {
             onASREvent?(.selectionAskStarted(question: "", selectedText: contextText))
             onASREvent?(.selectionAskAnswerDelta(L("没有识别到问题，请重试。", "No question was recognized. Please try again.")))
@@ -680,7 +671,7 @@ actor RecognitionSession {
         onASREvent?(.selectionAskStarted(question: question, selectedText: contextText))
 
         let client = currentLLMClient()
-        let effectiveContext = PromptContext(selectedText: contextText, clipboardText: promptContext.clipboardText)
+        let effectiveContext = PromptContext(selectedText: contextText, clipboardText: "")
         let prompt = SelectionAskPromptBuilder.requestText(
             mode: currentMode,
             context: effectiveContext,

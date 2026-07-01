@@ -59,21 +59,26 @@ struct SelectionAskView: View {
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(Color(red: 0.18, green: 0.18, blue: 0.18))
                 Spacer()
-                copyButton(text: state.selectedText, systemImage: "doc.on.doc")
-                    .disabled(state.selectedText.isEmpty)
+                if hasSelectedText {
+                    copyButton(text: state.selectedText, systemImage: "doc.on.doc")
+                }
             }
 
-            HStack(alignment: .top, spacing: 14) {
-                Rectangle()
-                    .fill(Color(red: 0.78, green: 0.76, blue: 0.72))
-                    .frame(width: 2)
-                Text(state.selectedText.isEmpty ? L("正在读取选中文本...", "Reading selected text...") : state.selectedText)
-                    .font(.system(size: 18))
-                    .foregroundStyle(Color(red: 0.48, green: 0.48, blue: 0.48))
-                    .lineSpacing(5)
-                    .textSelection(.enabled)
+            if hasSelectedText {
+                HStack(alignment: .top, spacing: 14) {
+                    Rectangle()
+                        .fill(Color(red: 0.78, green: 0.76, blue: 0.72))
+                        .frame(width: 2)
+                    Text(state.selectedText)
+                        .font(.system(size: 18))
+                        .foregroundStyle(Color(red: 0.48, green: 0.48, blue: 0.48))
+                        .lineSpacing(5)
+                        .lineLimit(3)
+                        .truncationMode(.tail)
+                        .textSelection(.enabled)
+                }
+                .padding(.leading, 34)
             }
-            .padding(.leading, 34)
         }
     }
 
@@ -159,6 +164,10 @@ struct SelectionAskView: View {
             return answer
         }
         return nil
+    }
+
+    private var hasSelectedText: Bool {
+        !state.selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func copyButton(text: String, systemImage: String) -> some View {

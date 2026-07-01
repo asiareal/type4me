@@ -19,24 +19,19 @@ final class SelectionAskState {
 enum SelectionAskPromptBuilder {
     enum ContextSource: String {
         case selection
-        case clipboard
         case none
     }
 
     static func contextSource(from context: PromptContext) -> ContextSource {
         let selected = context.selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
         if isUsableSelectedText(selected) { return .selection }
-
-        let clipboard = context.clipboardText.trimmingCharacters(in: .whitespacesAndNewlines)
-        return clipboard.isEmpty ? .none : .clipboard
+        return .none
     }
 
     static func contextText(from context: PromptContext) -> String {
         switch contextSource(from: context) {
         case .selection:
             return context.selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
-        case .clipboard:
-            return context.clipboardText.trimmingCharacters(in: .whitespacesAndNewlines)
         case .none:
             return ""
         }

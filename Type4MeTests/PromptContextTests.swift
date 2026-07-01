@@ -74,14 +74,14 @@ final class PromptContextTests: XCTestCase {
         XCTAssertEqual(SelectionAskPromptBuilder.contextText(from: ctx), "")
     }
 
-    func testSelectionAskFallsBackToClipboardWhenSelectionIsEmpty() {
+    func testSelectionAskDoesNotFallBackToClipboardWhenSelectionIsEmpty() {
         let ctx = PromptContext(selectedText: " \n\t ", clipboardText: "clipboard text")
-        XCTAssertEqual(SelectionAskPromptBuilder.contextText(from: ctx), "clipboard text")
+        XCTAssertEqual(SelectionAskPromptBuilder.contextText(from: ctx), "")
     }
 
-    func testSelectionAskFallsBackToClipboardWhenSelectionIsPlaceholder() {
+    func testSelectionAskDoesNotFallBackToClipboardWhenSelectionIsPlaceholder() {
         let ctx = PromptContext(selectedText: "selection", clipboardText: "clipboard text")
-        XCTAssertEqual(SelectionAskPromptBuilder.contextText(from: ctx), "clipboard text")
+        XCTAssertEqual(SelectionAskPromptBuilder.contextText(from: ctx), "")
     }
 
     func testMarkdownRendererPreservesSoftLineBreaksOutsideCodeFence() {
